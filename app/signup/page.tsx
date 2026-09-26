@@ -33,7 +33,8 @@ export default function SignupPage() {
       );
 
       // Save extra profile info (name) to our own backend/MongoDB
-      await fetch(`${API_URL}/api/users`, {
+           // Save extra profile info (name) to our own backend/MongoDB
+      const userRes = await fetch(`${API_URL}/api/users`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -42,6 +43,10 @@ export default function SignupPage() {
           email,
         }),
       });
+      if (!userRes.ok) {
+        const data = await userRes.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to create user record.");
+      }
 
       router.push("/profile");
     } catch (err: any) {
