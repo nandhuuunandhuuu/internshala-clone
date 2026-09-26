@@ -1,58 +1,77 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useAuth } from "../../lib/AuthContext";
+import { useAuth } from "../lib/AuthContext";
 import { useRouter } from "next/navigation";
-import { useLanguage } from "../../lib/LanguageContext";
-import { translations } from "../../lib/translations";
-import { API_URL } from "../../lib/apiConfig";
+import SkillsInput from "../components/SkillsInput";
+import { useLanguage } from "../lib/LanguageContext";
+import { translations } from "../lib/translations";
+import { useOtpGuard } from "../lib/useOtpGuard";
+import { API_URL } from "../lib/apiConfig";
 
-type Company = {
-  _id: string;
+const CLOUDINARY_CLOUD_NAME = "tz6kh7li";
+const CLOUDINARY_UPLOAD_PRESET = "resume_uploads";
+
+type UserData = {
   name: string;
-  website: string;
-  industry: string;
-  description: string;
-  verified: boolean;
+  email: string;
+  phone?: string;
+  education?: string;
+  skills?: string[];
+  resumeUrl?: string;
 };
 
-type LoginHistory = {
-  _id: string;
-  browser: string;
-  os: string;
-  deviceType: string;
-  createdAt: string;
-};
-
-export default function RecruiterProfilePage() {
+export default function ProfilePage() {
   const { user, loading } = useAuth();
   const router = useRouter();
-
   const { language } = useLanguage();
   const t = translations[language];
 
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [company, setCompany] = useState<Company | null>(null);
-  const [editing, setEditing] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const { checked, blocked } = useOtpGuard("/login");
+
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [loginHistory, setLoginHistory] = useState<LoginHistory[]>([]);
+  const [userData, setUserData] = useState<UserData | null>(null);
+  const [loginHistory, setLoginHistory] = useState<any[]>([]);
+  const [readiness, setReadiness] = useState<{
+    totalScore: number;
+    breakdown: {
+      profileScore: number;
+      skillsScore: number;
+      activityScore: number;
+    };
+    tips: string[];
+  } | null>(null);
+  const [skillOptions, setSkillOptions] = useState<string[]>([]);
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [uploading, setUploading] = useState(false);
   const [form, setForm] = useState({
     name: "",
     phone: "",
     email: "",
-    companyName: "",
-    website: "",
-    industry: "",
-    description: "",
+    education: "",
+    skills: "",
   });
+
+  const handleDeleteAccount = async () => {
+    if (!user) return;
+    setDeleting(true);
+    try {
+      await fetch(`${API_URL}/api/users/${user.uid}`, {
+        method: "DELETE",
+      });
+      router.push("/login");
+    } catch (err) {
+      console.error("Error deleting account:", err);
+      setDeleting(false);
+    }
+  };
 
   useEffect(() => {
     if (!loading && !user) {
-      router.push("/recruiter/login");
+      router.push("/login");
       return;
     }
 
@@ -60,118 +79,153 @@ export default function RecruiterProfilePage() {
       fetch(`${API_URL}/api/users/${user.uid}`)
         .then((res) => res.json())
         .then((data) => {
-          setName(data.name || "");
-          setEmail(data.email || "");
-          setPhone(data.phone || "");
-
-          setForm((prev) => ({
-            ...prev,
+          setUserData(data);
+          setForm({
             name: data.name || "",
             phone: data.phone || "",
             email: data.email || "",
-          }));
-        });
-
-      fetch(`${API_URL}/api/companies/by-user/${user.uid}`)
-        .then((res) => res.json())
-        .then((data) => {
-          setCompany(data);
-
-          setForm((prev) => ({
-            ...prev,
-            companyName: data.name || "",
-            website: data.website || "",
-            industry: data.industry || "",
-            description: data.description || "",
-          }));
+            education: data.education || "",
+            skills: (data.skills || []).join(", "),
+          });
         })
-        .catch((err) => console.error(err));
+        .catch((err) => console.error("Error fetching profile:", err));
 
       fetch(`${API_URL}/api/login-tracking/history/${user.uid}`)
         .then((res) => res.json())
-        .then((data) => {
-          setLoginHistory(data);
-        })
+        .then((data) => setLoginHistory(Array.isArray(data) ? data : []))
         .catch((err) => console.error(err));
+
+      fetch(`${API_URL}/api/users/${user.uid}/readiness`)
+        .then((res) => res.json())
+        .then((data) => setReadiness(data))
+        .catch((err) => console.error("Error fetching readiness:", err));
+
+      fetch(`${API_URL}/api/skills`)
+        .then((res) => res.json())
+        .then((data) => setSkillOptions(data))
+        .catch((err) => console.error("Error fetching skills list:", err));
     }
   }, [user, loading, router]);
 
   const handleSave = async () => {
-    if (!user || !company) return;
-
+    if (!user || !userData) return;
     setSaving(true);
+    setSaveError("");
+
+    const skillsArray = form.skills
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
 
     try {
-      await fetch(`${API_URL}/api/users/${user.uid}`, {
+      const res = await fetch(`${API_URL}/api/users/${user.uid}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: form.name,
           phone: form.phone,
+          education: form.education,
+          skills: skillsArray,
         }),
       });
 
-      await fetch(`${API_URL}/api/companies/${company._id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: form.companyName,
-          website: form.website,
-          industry: form.industry,
-          description: form.description,
-        }),
-      });
-
-      if (form.email !== email) {
-        await fetch(`${API_URL}/api/users/${user.uid}/email`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            newEmail: form.email,
-          }),
-        });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to save profile.");
       }
 
-      setName(form.name);
-      setPhone(form.phone);
-      setEmail(form.email);
+      const updated = await res.json();
 
-      setCompany({
-        ...company,
-        name: form.companyName,
-        website: form.website,
-        industry: form.industry,
-        description: form.description,
+      if (form.email !== userData.email) {
+        const emailRes = await fetch(`${API_URL}/api/users/${user.uid}/email`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ newEmail: form.email }),
+        });
+        if (!emailRes.ok) {
+          const data = await emailRes.json().catch(() => ({}));
+          throw new Error(data.error || "Failed to update email.");
+        }
+      }
+
+      setUserData({
+        ...updated,
+        email: form.email,
       });
-
       setEditing(false);
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      console.error("Error saving profile:", err);
+      setSaveError(err.message || "Something went wrong. Please try again.");
     } finally {
       setSaving(false);
     }
   };
 
-  const handleDeleteAccount = async () => {
+  const handleDeleteResume = async () => {
     if (!user) return;
-
-    setDeleting(true);
+    if (!confirm("Remove your uploaded resume?")) return;
 
     try {
-      await fetch(`${API_URL}/api/users/${user.uid}`, {
-        method: "DELETE",
+      const res = await fetch(`${API_URL}/api/users/${user.uid}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resumeUrl: "" }),
       });
 
-      router.push("/recruiter/login");
+      const updated = await res.json();
+      setUserData(updated);
     } catch (err) {
-      console.error(err);
-      setDeleting(false);
+      console.error("Error deleting resume:", err);
     }
   };
 
-  if (loading || !company) {
+  const handleResumeUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+    setUploading(true);
+
+    try {
+      const uploadData = new FormData();
+      uploadData.append("file", file);
+      uploadData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
+
+      const cloudRes = await fetch(
+        `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/raw/upload`,
+        { method: "POST", body: uploadData }
+      );
+
+      const cloudData = await cloudRes.json();
+
+      if (!cloudData.secure_url) throw new Error("Upload failed");
+
+      const res = await fetch(`${API_URL}/api/users/${user.uid}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resumeUrl: cloudData.secure_url }),
+      });
+
+      const updated = await res.json();
+      setUserData(updated);
+    } catch (err) {
+      console.error("Error uploading resume:", err);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  if (!checked || blocked) {
     return (
-      <div className="px-4 sm:px-8 py-10 max-w-2xl mx-auto text-center">
+      <div className="px-4 sm:px-8 py-10 max-w-5xl mx-auto text-center">
+        <p className="text-slate-600">{t.loading}</p>
+      </div>
+    );
+  }
+
+  if (loading || !userData) {
+    return (
+      <div className="px-4 sm:px-8 py-10 max-w-5xl mx-auto text-center">
         <p className="text-slate-600">{t.loading}</p>
       </div>
     );
@@ -184,6 +238,7 @@ export default function RecruiterProfilePage() {
       </h1>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Main column */}
         <div className="lg:col-span-2">
           <div className="bg-white border border-[#0F172A]/10 rounded-xl p-5 sm:p-6 shadow-sm flex flex-col gap-4">
             {editing ? (
@@ -192,7 +247,6 @@ export default function RecruiterProfilePage() {
                   <label className="block text-sm text-slate-500 mb-1">
                     {t.nameLabel}
                   </label>
-
                   <input
                     value={form.name}
                     onChange={(e) =>
@@ -206,13 +260,11 @@ export default function RecruiterProfilePage() {
                   <label className="block text-sm text-slate-500 mb-1">
                     {t.phoneLabel}
                   </label>
-
                   <input
                     value={form.phone}
                     onChange={(e) =>
                       setForm({ ...form, phone: e.target.value })
                     }
-                    placeholder="e.g. 9876543210"
                     className="w-full px-3 py-2 border border-[#0F172A]/15 rounded-lg"
                   />
                 </div>
@@ -221,7 +273,6 @@ export default function RecruiterProfilePage() {
                   <label className="block text-sm text-slate-500 mb-1">
                     {t.emailLabel}
                   </label>
-
                   <input
                     type="email"
                     value={form.email}
@@ -234,13 +285,12 @@ export default function RecruiterProfilePage() {
 
                 <div>
                   <label className="block text-sm text-slate-500 mb-1">
-                    {t.companyLabel}
+                    {t.educationLabel}
                   </label>
-
                   <input
-                    value={form.companyName}
+                    value={form.education}
                     onChange={(e) =>
-                      setForm({ ...form, companyName: e.target.value })
+                      setForm({ ...form, education: e.target.value })
                     }
                     className="w-full px-3 py-2 border border-[#0F172A]/15 rounded-lg"
                   />
@@ -248,61 +298,33 @@ export default function RecruiterProfilePage() {
 
                 <div>
                   <label className="block text-sm text-slate-500 mb-1">
-                    {t.websiteLabel}
+                    {t.skillsLabel}
                   </label>
-
-                  <input
-                    value={form.website}
-                    onChange={(e) =>
-                      setForm({ ...form, website: e.target.value })
+                  <SkillsInput
+                    value={form.skills}
+                    onChange={(val) =>
+                      setForm({ ...form, skills: val })
                     }
-                    className="w-full px-3 py-2 border border-[#0F172A]/15 rounded-lg"
+                    suggestions={skillOptions}
                   />
                 </div>
 
-                <div>
-                  <label className="block text-sm text-slate-500 mb-1">
-                    {t.industryLabel}
-                  </label>
-
-                  <input
-                    value={form.industry}
-                    onChange={(e) =>
-                      setForm({ ...form, industry: e.target.value })
-                    }
-                    className="w-full px-3 py-2 border border-[#0F172A]/15 rounded-lg"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm text-slate-500 mb-1">
-                    {t.companyDescLabel}
-                  </label>
-
-                  <textarea
-                    value={form.description}
-                    onChange={(e) =>
-                      setForm({ ...form, description: e.target.value })
-                    }
-                    rows={3}
-                    className="w-full px-3 py-2 border border-[#0F172A]/15 rounded-lg"
-                  />
-                </div>
+                {saveError && <p className="text-sm text-red-600">{saveError}</p>}
 
                 <div className="flex gap-3 mt-2">
                   <button
                     onClick={handleSave}
                     disabled={saving}
-                    className="bg-[#F5A623] text-[#0F172A] rounded-lg px-5 py-2 font-semibold hover:opacity-90 transition"
+                    className="bg-[#F5A623] text-[#0F172A] rounded-lg px-5 py-2 font-semibold hover:opacity-90 transition disabled:opacity-50"
                   >
-                    {saving ? t.saving || "Saving..." : t.save}
+                    {saving ? "Saving..." : "Save"}
                   </button>
 
                   <button
                     onClick={() => setEditing(false)}
                     className="border border-[#0F172A]/15 rounded-lg px-5 py-2 font-medium"
                   >
-                    {t.cancel}
+                    Cancel
                   </button>
                 </div>
               </>
@@ -311,55 +333,98 @@ export default function RecruiterProfilePage() {
                 <div>
                   <p className="text-sm text-slate-500">{t.nameLabel}</p>
                   <p className="text-base font-medium text-[#0F172A]">
-                    {name}
+                    {userData.name}
                   </p>
                 </div>
 
                 <div>
-                  <p className="text-sm text-slate-500">{t.emailLabel}</p>
+                  <p className="text-sm text-slate-500">Email</p>
                   <p className="text-base font-medium text-[#0F172A]">
-                    {email}
+                    {userData.email}
                   </p>
                 </div>
 
-                <div>
-                  <p className="text-sm text-slate-500">{t.phoneLabel}</p>
-                  <p className="text-base font-medium text-[#0F172A]">
-                    {phone || "—"}
-                  </p>
-                </div>
+                {userData.phone && (
+                  <div>
+                    <p className="text-sm text-slate-500">{t.phoneLabel}</p>
+                    <p className="text-base font-medium text-[#0F172A]">
+                      {userData.phone}
+                    </p>
+                  </div>
+                )}
+
+                {userData.education && (
+                  <div>
+                    <p className="text-sm text-slate-500">
+                      {t.educationLabel}
+                    </p>
+                    <p className="text-base font-medium text-[#0F172A]">
+                      {userData.education}
+                    </p>
+                  </div>
+                )}
+
+                {userData.skills && userData.skills.length > 0 && (
+                  <div>
+                    <p className="text-sm text-slate-500 mb-2">
+                      {t.skillsLabel}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {userData.skills.map((skill) => (
+                        <span
+                          key={skill}
+                          className="text-xs sm:text-sm bg-[#F5A623]/10 text-[#B7791F] px-3 py-1 rounded-full"
+                        >
+                          {skill}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 <div>
-                  <p className="text-sm text-slate-500">{t.companyLabel}</p>
-                  <p className="text-base font-medium text-[#0F172A]">
-                    {company.name}{" "}
-                    {company.verified && (
-                      <span className="text-xs text-[#0D9488] font-medium">
-                        ✓ {t.verified}
-                      </span>
-                    )}
+                  <p className="text-sm text-slate-500 mb-2">
+                    {t.resumeLabel}
                   </p>
-                </div>
 
-                <div>
-                  <p className="text-sm text-slate-500">{t.industryLabel}</p>
-                  <p className="text-base font-medium text-[#0F172A]">
-                    {company.industry || "—"}
-                  </p>
-                </div>
+                  {userData.resumeUrl ? (
+                    <div className="flex items-center gap-3">
+                      <a
+                        href={userData.resumeUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[#0D9488] font-medium hover:underline"
+                      >
+                        {t.viewResume}
+                      </a>
 
-                <div>
-                  <p className="text-sm text-slate-500">{t.websiteLabel}</p>
-                  <p className="text-base font-medium text-[#0F172A]">
-                    {company.website || "—"}
-                  </p>
-                </div>
+                      <button
+                        onClick={handleDeleteResume}
+                        className="text-sm text-red-600 hover:underline"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-slate-500">{t.noResume}</p>
+                  )}
 
-                <div>
-                  <p className="text-sm text-slate-500">{t.companyDescLabel}</p>
-                  <p className="text-sm text-slate-600">
-                    {company.description || "—"}
-                  </p>
+                  <div className="mt-2">
+                    <label className="inline-block cursor-pointer text-sm font-medium text-[#0F172A] border border-[#0F172A]/15 rounded-lg px-4 py-2 hover:bg-[#0F172A]/5 transition">
+                      {uploading
+                        ? "Uploading..."
+                        : userData.resumeUrl
+                        ? "Replace Resume (PDF)"
+                        : "Upload Resume (PDF)"}
+                      <input
+                        type="file"
+                        accept="application/pdf"
+                        onChange={handleResumeUpload}
+                        disabled={uploading}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
                 </div>
 
                 <button
@@ -371,77 +436,113 @@ export default function RecruiterProfilePage() {
               </>
             )}
           </div>
-        </div>
 
-        <div className="lg:col-span-1">
-          <div className="bg-white border border-[#0F172A]/10 rounded-xl p-5 sm:p-6 shadow-sm">
-            <h2 className="text-lg font-semibold text-[#0F172A] mb-4">
-              {t.loginHistory}
-            </h2>
-
-            {loginHistory.length === 0 ? (
-              <p className="text-sm text-slate-500">
-                {t.noLoginHistory}
-              </p>
+          <div className="mt-6 text-center lg:text-left">
+            {!showDeleteConfirm ? (
+              <button
+                onClick={() => setShowDeleteConfirm(true)}
+                className="text-sm text-red-600 hover:underline"
+              >
+                Delete Account
+              </button>
             ) : (
-              <div className="flex flex-col gap-3">
-                {loginHistory.map((login) => (
-                  <div
-                    key={login._id}
-                    className="border border-[#0F172A]/10 rounded-lg p-4"
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4 max-w-sm mx-auto lg:mx-0">
+                <p className="text-sm text-red-700 mb-3">
+                  This will permanently delete your account and cannot be
+                  undone. Are you sure?
+                </p>
+
+                <div className="flex gap-2 justify-center lg:justify-start">
+                  <button
+                    onClick={handleDeleteAccount}
+                    disabled={deleting}
+                    className="text-sm font-medium bg-red-600 text-white px-4 py-1.5 rounded-lg disabled:opacity-50"
                   >
-                    <p className="text-sm font-medium text-[#0F172A]">
-                      {login.deviceType || t.unknownDevice}
-                    </p>
+                    {deleting ? "Deleting..." : "Yes, Delete"}
+                  </button>
 
-                    <p className="text-sm text-slate-600 mt-1">
-                      {login.browser || t.unknownBrowser} •{" "}
-                      {login.os || t.unknownOS}
-                    </p>
-
-                    <p className="text-xs text-slate-500 mt-1">
-                      {new Date(login.createdAt).toLocaleString()}
-                    </p>
-                  </div>
-                ))}
+                  <button
+                    onClick={() => setShowDeleteConfirm(false)}
+                    className="text-sm font-medium border border-[#0F172A]/15 px-4 py-1.5 rounded-lg"
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
             )}
           </div>
         </div>
-      </div>
 
-      <div className="mt-6 text-center">
-        {!showDeleteConfirm ? (
-          <button
-            onClick={() => setShowDeleteConfirm(true)}
-            className="text-sm text-red-600 hover:underline"
-          >
-            {t.deleteAccount}
-          </button>
-        ) : (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4 max-w-sm mx-auto">
-            <p className="text-sm text-red-700 mb-3">
-              {t.deleteRecruiterConfirm}
+        {/* Sidebar column */}
+        <div className="lg:col-span-1 flex flex-col gap-6">
+          {readiness && (
+            <div className="bg-white border border-[#0F172A]/10 rounded-xl p-5 sm:p-6 shadow-sm">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-sm font-medium text-slate-600">
+                  {t.careerReadiness}
+                </p>
+                <span className="text-2xl font-bold text-[#0F172A]">
+                  {readiness.totalScore}
+                  <span className="text-sm text-slate-400">/100</span>
+                </span>
+              </div>
+
+              <div className="w-full bg-slate-100 rounded-full h-2 mb-4">
+                <div
+                  className="bg-[#F5A623] h-2 rounded-full transition-all"
+                  style={{ width: `${readiness.totalScore}%` }}
+                />
+              </div>
+
+              <p className="text-sm font-medium text-slate-600 mb-2">
+                {t.careerRoadmap}
+              </p>
+
+              {readiness?.tips && readiness.tips.length > 0 && (
+                <ul className="flex flex-col gap-1.5">
+                  {readiness.tips.map((tip, i) => (
+                    <li
+                      key={i}
+                      className="text-sm text-slate-600 flex gap-2"
+                    >
+                      <span className="text-[#0D9488]">→</span> {tip}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          <div className="bg-white border border-[#0F172A]/10 rounded-xl p-5 sm:p-6 shadow-sm">
+            <p className="text-sm font-semibold text-slate-600 mb-3">
+              {t.loginHistory}
             </p>
 
-            <div className="flex gap-2 justify-center">
-              <button
-                onClick={handleDeleteAccount}
-                disabled={deleting}
-                className="text-sm font-medium bg-red-600 text-white px-4 py-1.5 rounded-lg disabled:opacity-50"
-              >
-                {deleting ? t.deleting : t.yesDelete}
-              </button>
+            {loginHistory.length === 0 && (
+              <p className="text-sm text-slate-500">
+                {t.noLoginHistory}
+              </p>
+            )}
 
-              <button
-                onClick={() => setShowDeleteConfirm(false)}
-                className="text-sm font-medium border border-[#0F172A]/15 px-4 py-1.5 rounded-lg"
-              >
-                {t.cancel}
-              </button>
+            <div className="flex flex-col gap-2">
+              {loginHistory.map((entry) => (
+                <div
+                  key={entry._id}
+                  className="text-sm text-slate-600 border-b border-[#0F172A]/5 pb-2 last:border-0"
+                >
+                  <span className="font-medium text-[#0F172A]">
+                    {entry.browser}
+                  </span>{" "}
+                  on {entry.os} ({entry.deviceType}) — {entry.ipAddress}
+                  <br />
+                  <span className="text-xs text-slate-400">
+                    {new Date(entry.createdAt).toLocaleString()}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );
