@@ -43,8 +43,8 @@ export default function RecruiterSignupPage() {
         form.password
       );
 
-      // Create the User record first
-      await fetch(`${API_URL}/api/users`, {
+            // Create the User record first
+      const userRes = await fetch(`${API_URL}/api/users`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -53,9 +53,13 @@ export default function RecruiterSignupPage() {
           email: form.email,
         }),
       });
+      if (!userRes.ok) {
+        const data = await userRes.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to create user record.");
+      }
 
       // Then create the Company (this also sets user.role = "recruiter")
-      await fetch(`${API_URL}/api/companies`, {
+      const companyRes = await fetch(`${API_URL}/api/companies`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -66,7 +70,14 @@ export default function RecruiterSignupPage() {
           description: form.description,
         }),
       });
+      if (!companyRes.ok) {
+        const data = await companyRes.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to create company record.");
+      }
 
+      sessionStorage.setItem("userRole", "recruiter");
+      router.push("/recruiter/dashboard");
+      
       sessionStorage.setItem("userRole", "recruiter");
       router.push("/recruiter/dashboard");
     } catch (err: any) {
