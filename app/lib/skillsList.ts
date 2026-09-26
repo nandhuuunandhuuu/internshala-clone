@@ -1,0 +1,16 @@
+export const MASTER_SKILLS = [
+  "React", "Next.js", "Vue.js", "Angular", "JavaScript", "TypeScript",
+  "HTML", "CSS", "Tailwind CSS", "Node.js", "Express.js", "MongoDB",
+  "MySQL", "PostgreSQL", "Firebase", "Python", "Django", "Flask",
+  "Java", "Spring Boot", "C++", "C", "C#", ".NET", "PHP", "Laravel",
+  "Ruby", "Ruby on Rails", "Go", "Rust", "Swift", "Kotlin", "Flutter",
+  "React Native", "Android Development", "iOS Development",
+  "Machine Learning", "Deep Learning", "Data Science", "Data Analysis",
+  "SQL", "Excel", "Power BI", "Tableau", "AWS", "Azure", "Google Cloud",
+  "Docker", "Kubernetes", "Git", "GitHub", "CI/CD", "Linux",
+  "REST API", "GraphQL", "Redux", "Figma", "UI/UX Design",
+  "Photoshop", "Illustrator", "Content Writing", "SEO", "Digital Marketing",
+  "Social Media Marketing", "Sales", "Business Development",
+  "Project Management", "Communication", "Problem Solving",
+  "Leadership", "Teamwork",
+].sort();

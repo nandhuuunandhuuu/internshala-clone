@@ -1,0 +1,1 @@
+export { default } from "../../../../admin/edit/[type]/[id]/page";
